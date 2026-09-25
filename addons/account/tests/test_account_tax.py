@@ -398,3 +398,52 @@ class TestAccountTax(AccountTestInvoicingCommon):
         # percentage tax, early exit
         search_method_ignored = get_search_method(0.125, 'REC 0.12 (Kopie)', amount_type='percent')
         self.assertIsNone(search_method_ignored)
+
+    def test_product_uom_values_fall_back_only_when_there_is_no_uom(self):
+        """ The zero defaults are reserved for the case where the line genuinely has no uom.
+
+        As soon as a uom is known, the taxes computation context must expose its real values,
+        otherwise a uom-based tax silently evaluates against zeros instead of failing.
+        """
+        AccountTax = self.env['account.tax']
+        uom = self.env['uom.uom'].create({
+            'name': "Test Tax UoM",
+            'category_id': self.env.ref('uom.product_uom_categ_unit').id,
+            'uom_type': 'bigger',
+            'factor': 42.0,
+        })
+        default_values = AccountTax._eval_taxes_computation_prepare_product_uom_default_values({'factor'})
+
+        # Happy path: the real uom values are exposed to the formula.
+        self.assertEqual(
+            AccountTax._eval_taxes_computation_prepare_product_uom_values(default_values, product_uom=uom),
+            {'factor': 42.0},
+        )
+
+        # Only a genuinely missing uom may degrade to the documented defaults.
+        self.assertEqual(
+            AccountTax._eval_taxes_computation_prepare_product_uom_values(
+                default_values,
+                product_uom=self.env['uom.uom'],
+            ),
+            {'factor': 0.0},
+        )
+
+    def test_base_line_product_uom_on_invoice_line(self):
+        """ Control: an invoice line already carries its uom into the taxes computation. """
+        invoice = self.env['account.move'].create({
+            'move_type': 'out_invoice',
+            'partner_id': self.partner_a.id,
+            'invoice_line_ids': [
+                Command.create({
+                    'name': 'invoice_line',
+                    'product_id': self.product_a.id,
+                    'quantity': 1.0,
+                    'price_unit': 100.0,
+                }),
+            ],
+        })
+        line = invoice.invoice_line_ids
+        base_line = invoice._prepare_product_base_line_for_taxes_computation(line)
+        self.assertEqual(base_line['product_uom_id'], line.product_uom_id)
+        self.assertTrue(base_line['product_uom_id'])
