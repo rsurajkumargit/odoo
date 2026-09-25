@@ -806,6 +806,9 @@ class SaleOrderLine(models.Model):
             self,
             **{
                 'tax_ids': self.tax_id,
+                # The field is named 'product_uom' here, so the generic record lookup cannot find
+                # 'product_uom_id': pass it explicitly or uom-based python taxes evaluate against an empty uom.
+                'product_uom_id': self.product_uom,
                 'quantity': self.product_uom_qty,
                 'partner_id': self.order_id.partner_id,
                 'currency_id': self.order_id.currency_id or self.order_id.company_id.currency_id,
