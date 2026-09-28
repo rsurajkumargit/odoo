@@ -858,6 +858,19 @@ class TestSaleOrder(SaleCommon):
         base_line = sol._prepare_base_line_for_taxes_computation()
         self.assertEqual(base_line['product_uom_id'], sol.product_uom)
 
+    def test_base_line_uom_reaches_tax_evaluation_context(self):
+        """ The uom fields evaluated by a tax must come from the line's uom, not from the zero defaults. """
+        sol = self.sale_order.order_line[0]
+        base_line = sol._prepare_base_line_for_taxes_computation()
+        AccountTax = self.env['account.tax']
+        default_values = AccountTax._eval_taxes_computation_prepare_product_uom_default_values({'factor'})
+        uom_values = AccountTax._eval_taxes_computation_prepare_product_uom_values(
+            default_values,
+            product_uom=base_line['product_uom_id'],
+        )
+        self.assertNotEqual(sol.product_uom.factor, 0.0)
+        self.assertEqual(uom_values['factor'], sol.product_uom.factor)
+
 @tagged('post_install', '-at_install')
 class TestSaleOrderInvoicing(AccountTestInvoicingCommon, SaleCommon):
     def test_invoice_state_when_ordered_quantity_is_negative(self):

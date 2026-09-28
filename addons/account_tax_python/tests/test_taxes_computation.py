@@ -1,3 +1,4 @@
+from odoo import Command
 from odoo.addons.account.tests.test_tax import TestTaxCommon
 from odoo.tests import tagged
 from odoo.exceptions import ValidationError
@@ -152,3 +153,56 @@ class TestTaxesComputation(TestTaxCommon):
         # No access to builtins that are not part of the whitelist.
         with self.assertRaises(ValidationError):
             self.python_tax(formula='range(1, 10)')
+
+    def test_uom_based_formula_on_sale_order_matches_invoice(self):
+        """ A uom-based formula must give the same tax on a sale order as on a customer invoice.
+
+        The uom must never degrade to zero silently: that turns a wrong configuration into a
+        wrong amount instead of an error.
+        """
+        self.ensure_installed('sale')
+
+        uom = self.env['uom.uom'].create({
+            'name': "test_uom_based_formula_on_sale_order_matches_invoice",
+            'category_id': self.env.ref('uom.product_uom_categ_unit').id,
+            'uom_type': 'bigger',
+            'factor': 42.0,
+        })
+        product = self.env['product.product'].create({
+            'name': "test_uom_based_formula_on_sale_order_matches_invoice",
+            'uom_id': uom.id,
+            'uom_po_id': uom.id,
+            'list_price': 100.0,
+        })
+        tax = self.python_tax("uom.factor * quantity * price_unit * 0.1")
+        expected_tax_amount = 42.0 * 2.0 * 100.0 * 0.1
+
+        invoice = self.env['account.move'].create({
+            'move_type': 'out_invoice',
+            'partner_id': self.partner_a.id,
+            'invoice_line_ids': [
+                Command.create({
+                    'product_id': product.id,
+                    'product_uom_id': uom.id,
+                    'quantity': 2.0,
+                    'price_unit': 100.0,
+                    'tax_ids': [Command.set(tax.ids)],
+                }),
+            ],
+        })
+        invoice_line = invoice.invoice_line_ids
+        self.assertAlmostEqual(invoice_line.price_total - invoice_line.price_subtotal, expected_tax_amount)
+
+        sale_order = self.env['sale.order'].create({
+            'partner_id': self.partner_a.id,
+            'order_line': [
+                Command.create({
+                    'product_id': product.id,
+                    'product_uom': uom.id,
+                    'product_uom_qty': 2.0,
+                    'price_unit': 100.0,
+                    'tax_id': [Command.set(tax.ids)],
+                }),
+            ],
+        })
+        self.assertAlmostEqual(sale_order.order_line.price_tax, expected_tax_amount)
